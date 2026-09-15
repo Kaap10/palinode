@@ -144,20 +144,26 @@ def test_pid_alive_win32_wait_codes(monkeypatch):
 
 
 def test_pid_alive_exit_code_259_dead():
-    """Processes exiting with code 259 (STILL_ACTIVE) must be recognized as DEAD."""
+    """Processes exiting with code 259 (STILL_ACTIVE on Windows) must be recognized as DEAD."""
     proc = subprocess.Popen([sys.executable, "-c", "import sys; sys.exit(259)"])
     proc.wait()
-    assert proc.returncode == 259
+    if sys.platform == "win32":
+        assert proc.returncode == 259
     assert _pid_alive(proc.pid) is False
 
 
 def test_under_claude_worktrees_case_and_boundary():
-    # Casing on Windows should match
-    assert _under_claude_worktrees("c:/repo", "C:/repo/.claude/worktrees/dead") is True
-    assert _under_claude_worktrees("C:/repo", "c:/repo/.claude/worktrees/sub/deep") is True
-    # Substring / prefix hijacking must be rejected
-    assert _under_claude_worktrees("c:/repo", "c:/repo/.claude/worktrees_fake/dead") is False
-    assert _under_claude_worktrees("c:/repo", "c:/repo/.claude/other/dead") is False
+    if sys.platform == "win32":
+        # Casing on Windows should match
+        assert _under_claude_worktrees("c:/repo", "C:/repo/.claude/worktrees/dead") is True
+        assert _under_claude_worktrees("C:/repo", "c:/repo/.claude/worktrees/sub/deep") is True
+        assert _under_claude_worktrees("c:/repo", "c:/repo/.claude/worktrees_fake/dead") is False
+        assert _under_claude_worktrees("c:/repo", "c:/repo/.claude/other/dead") is False
+    else:
+        assert _under_claude_worktrees("/repo", "/repo/.claude/worktrees/dead") is True
+        assert _under_claude_worktrees("/repo", "/repo/.claude/worktrees/sub/deep") is True
+        assert _under_claude_worktrees("/repo", "/repo/.claude/worktrees_fake/dead") is False
+        assert _under_claude_worktrees("/repo", "/repo/.claude/other/dead") is False
 
 
 
