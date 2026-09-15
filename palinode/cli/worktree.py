@@ -22,6 +22,7 @@ import json as _json
 import os
 import re
 import subprocess  # nosec B404 - argv-form git calls, no shell
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -55,20 +56,66 @@ class WorktreeVerdict:
     reason: str
 
 
+if sys.platform == "win32":
+    import ctypes
+    from ctypes import wintypes
+
+    _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    _SYNCHRONIZE = 0x00100000
+    _WAIT_TIMEOUT = 0x00000102
+    _WAIT_OBJECT_0 = 0x00000000
+    _ERROR_INVALID_PARAMETER = 87
+
+    _kernel32 = ctypes.windll.kernel32
+    _kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    _kernel32.OpenProcess.restype = wintypes.HANDLE
+    _kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    _kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    _kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    _kernel32.CloseHandle.restype = wintypes.BOOL
+    _kernel32.GetLastError.argtypes = []
+    _kernel32.GetLastError.restype = wintypes.DWORD
+
+
 def _pid_alive(pid: int) -> bool:
     """True if a process with ``pid`` currently exists.
 
-    A ``PermissionError`` means the process exists but is owned by another user;
-    any other OS error means we can't tell — both are treated as alive so we
-    never remove a worktree whose owner might still be running.
+    A ``PermissionError`` (or Win32 ``ERROR_ACCESS_DENIED``) means the process
+    exists but is owned by another user; any other OS error means we can't tell —
+    both are treated as alive so we never remove a worktree whose owner might
+    still be running.
     """
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0 or pid > 0xFFFFFFFF:
         return False
-    except OSError:
-        return True
+
+    if sys.platform == "win32":
+        handle = _kernel32.OpenProcess(
+            _PROCESS_QUERY_LIMITED_INFORMATION | _SYNCHRONIZE, False, pid
+        )
+        if not handle:
+            err = _kernel32.GetLastError()
+            if err == _ERROR_INVALID_PARAMETER:
+                return False
+            # ERROR_ACCESS_DENIED (5) or any unexpected OS error -> fail-safe alive
+            return True
+
+        try:
+            res = _kernel32.WaitForSingleObject(handle, 0)
+            if res == _WAIT_TIMEOUT:
+                return True
+            elif res == _WAIT_OBJECT_0:
+                return False
+            return True
+        finally:
+            _kernel32.CloseHandle(handle)
+    else:
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except OSError:
+            return True
 
 
 def _parse_porcelain(text: str) -> list[dict]:
@@ -107,8 +154,9 @@ def _lock_reason(repo_root: str, wt_path: str, porcelain_reason: str) -> str:
 
 
 def _under_claude_worktrees(repo_root: str, wt_path: str) -> bool:
-    marker = str(Path(repo_root) / ".claude" / "worktrees") + os.sep
-    return (str(Path(wt_path)) + os.sep).startswith(marker)
+    marker = os.path.normcase(os.path.normpath(Path(repo_root) / ".claude" / "worktrees")) + os.sep
+    target = os.path.normcase(os.path.normpath(wt_path)) + os.sep
+    return target.startswith(marker)
 
 
 def reconcile(repo_root: str) -> list[WorktreeVerdict]:
