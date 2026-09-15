@@ -6,6 +6,12 @@ All notable changes to Palinode. Format follows [Keep a Changelog](https://keepa
 
 ### Added
 
+- **Hosted OpenAI-compatible embedding endpoints support bearer authentication
+  and configurable paths.** Set `PALINODE_EMBEDDING_API_KEY` (or
+  `PALINODE_EMBEDDING_API_KEY_FILE`) for `Authorization: Bearer` on the
+  `openai` embedding dialect only, and use `embeddings.primary.endpoint_path`
+  when a provider does not serve `/v1/embeddings`. Existing Ollama and
+  `/v1/embeddings` configurations are unchanged.
 - `doctor`: new `memory_dir_writable` check. `memory_dir_exists` is critical but only
   asserts the path is a directory, so a memory directory on a read-only mount, owned by
   another user, or with its mode tightened by hand reported green while every save failed.

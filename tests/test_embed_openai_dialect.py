@@ -24,6 +24,7 @@ real SQLite store under ``tmp_path`` (no DB mocking, per CLAUDE.md).
 from __future__ import annotations
 
 import json
+import logging
 
 import httpx
 import pytest
@@ -31,6 +32,7 @@ from pydantic import TypeAdapter
 
 import palinode.core.embedder as embedder_mod
 import palinode.core.ollama_client as ollama_client_mod
+from palinode.core.auth import load_embedding_api_key
 from palinode.core import store
 from palinode.core.config import Config, PrimaryEmbeddingConfig, config
 from palinode.core.embedder import EmbeddingInputError, EmbeddingUnavailable
@@ -90,6 +92,7 @@ def openai_dialect(monkeypatch):
     monkeypatch.setattr(config.embeddings.primary, "dialect", "openai")
     monkeypatch.setattr(config.embeddings.primary, "url", "http://embed-host:8080")
     monkeypatch.setattr(config.embeddings.primary, "model", "bge-m3")
+    monkeypatch.setattr(config.embeddings.primary, "endpoint_path", None)
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -120,6 +123,79 @@ def test_openai_dialect_loads_through_config_adapter():
         {"embeddings": {"primary": {"dialect": "openai", "url": "http://h:8080/v1"}}}
     )
     assert cfg.embeddings.primary.dialect == "openai"
+
+
+def test_default_endpoint_path_is_none():
+    assert PrimaryEmbeddingConfig().endpoint_path is None
+
+
+def test_endpoint_path_loads_through_config_adapter():
+    cfg = TypeAdapter(Config).validate_python(
+        {
+            "embeddings": {
+                "primary": {
+                    "dialect": "openai",
+                    "endpoint_path": "/embeddings",
+                }
+            }
+        }
+    )
+    assert cfg.embeddings.primary.endpoint_path == "/embeddings"
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Embedding API key loading
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def test_embedding_api_key_loads_from_env(monkeypatch):
+    monkeypatch.setenv("PALINODE_EMBEDDING_API_KEY", "  env-secret  ")
+    monkeypatch.delenv("PALINODE_EMBEDDING_API_KEY_FILE", raising=False)
+
+    assert load_embedding_api_key() == "env-secret"
+
+
+def test_embedding_api_key_loads_from_file_and_strips(
+    monkeypatch, tmp_path
+):
+    key_file = tmp_path / "embedding-key"
+    key_file.write_text("  file-secret\n", encoding="utf-8")
+
+    monkeypatch.delenv("PALINODE_EMBEDDING_API_KEY", raising=False)
+    monkeypatch.setenv("PALINODE_EMBEDDING_API_KEY_FILE", str(key_file))
+
+    assert load_embedding_api_key() == "file-secret"
+
+
+def test_unreadable_embedding_api_key_file_logs_error_without_path(
+    monkeypatch, tmp_path, caplog
+):
+    missing_file = tmp_path / "very-sensitive-secret-location"
+
+    monkeypatch.delenv("PALINODE_EMBEDDING_API_KEY", raising=False)
+    monkeypatch.setenv(
+        "PALINODE_EMBEDDING_API_KEY_FILE",
+        str(missing_file),
+    )
+
+    with caplog.at_level(logging.ERROR, logger="palinode.auth"):
+        assert load_embedding_api_key() is None
+
+    assert "PALINODE_EMBEDDING_API_KEY_FILE set but unreadable" in caplog.text
+    assert str(missing_file) not in caplog.text
+
+
+def test_embedding_api_key_env_wins_over_file(monkeypatch, tmp_path):
+    key_file = tmp_path / "embedding-key"
+    key_file.write_text("file-secret", encoding="utf-8")
+
+    monkeypatch.setenv("PALINODE_EMBEDDING_API_KEY", "env-secret")
+    monkeypatch.setenv(
+        "PALINODE_EMBEDDING_API_KEY_FILE",
+        str(key_file),
+    )
+
+    assert load_embedding_api_key() == "env-secret"
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -164,6 +240,105 @@ def test_openai_single_embed_posts_model_and_input(openai_dialect):
     assert json.loads(req.content) == {"model": "bge-m3", "input": ["hello"]}
 
 
+def test_openai_sends_bearer_when_embedding_key_configured(
+    openai_dialect, monkeypatch
+):
+    monkeypatch.setenv("PALINODE_EMBEDDING_API_KEY", "secret-key")
+    monkeypatch.delenv("PALINODE_EMBEDDING_API_KEY_FILE", raising=False)
+
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=_openai_body([[1.0, 2.0]]))
+
+    oc = _client(handler)
+    try:
+        oc.embed("hello")
+    finally:
+        oc.close()
+
+    assert seen[0].headers["Authorization"] == "Bearer secret-key"
+
+
+def test_openai_sends_no_authorization_when_key_unconfigured(
+    openai_dialect, monkeypatch
+):
+    monkeypatch.delenv("PALINODE_EMBEDDING_API_KEY", raising=False)
+    monkeypatch.delenv("PALINODE_EMBEDDING_API_KEY_FILE", raising=False)
+
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=_openai_body([[1.0, 2.0]]))
+
+    oc = _client(handler)
+    try:
+        oc.embed("hello")
+    finally:
+        oc.close()
+
+    assert "Authorization" not in seen[0].headers
+
+
+def test_ollama_never_sends_embedding_api_key(monkeypatch):
+    monkeypatch.setattr(config.embeddings.primary, "dialect", "ollama")
+    monkeypatch.setattr(
+        config.embeddings.primary,
+        "url",
+        "http://embed-host:11434",
+    )
+    monkeypatch.setenv("PALINODE_EMBEDDING_API_KEY", "must-not-leak")
+    monkeypatch.delenv("PALINODE_EMBEDDING_API_KEY_FILE", raising=False)
+
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={"embeddings": [[1.0, 2.0]]},
+        )
+
+    oc = _client(handler)
+    try:
+        oc.embed("hello")
+    finally:
+        oc.close()
+
+    assert seen[0].url.path == "/api/embed"
+    assert "Authorization" not in seen[0].headers
+
+
+def test_embedding_api_key_is_not_emitted_in_logs(
+    openai_dialect, monkeypatch, caplog
+):
+    secret = "super-secret-embedding-key"
+
+    monkeypatch.setenv("PALINODE_EMBEDDING_API_KEY", secret)
+    monkeypatch.delenv("PALINODE_EMBEDDING_API_KEY_FILE", raising=False)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_openai_body([[1.0, 2.0]]),
+        )
+
+    oc = _client(handler)
+    try:
+        with caplog.at_level(
+            logging.INFO,
+            logger="palinode.ollama.events",
+        ):
+            oc.embed("hello")
+    finally:
+        oc.close()
+
+    assert secret not in caplog.text
+    assert f"Bearer {secret}" not in caplog.text
+
+
 def test_base_url_ending_in_v1_is_not_doubled(openai_dialect, monkeypatch):
     monkeypatch.setattr(config.embeddings.primary, "url", "http://embed-host:8080/v1/")
     seen: list[str] = []
@@ -178,6 +353,41 @@ def test_base_url_ending_in_v1_is_not_doubled(openai_dialect, monkeypatch):
     finally:
         oc.close()
     assert seen == ["http://embed-host:8080/v1/embeddings"]
+
+
+def test_custom_endpoint_path_is_appended_to_provider_root(
+    openai_dialect, monkeypatch
+):
+    monkeypatch.setattr(
+        config.embeddings.primary,
+        "url",
+        "https://provider.example/v1beta/openai",
+    )
+    monkeypatch.setattr(
+        config.embeddings.primary,
+        "endpoint_path",
+        "/embeddings",
+    )
+
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json=_openai_body([[1.0, 2.0]]),
+        )
+
+    oc = _client(handler)
+    try:
+        oc.embed("hello")
+    finally:
+        oc.close()
+
+    assert (
+        str(seen[0].url)
+        == "https://provider.example/v1beta/openai/embeddings"
+    )
 
 
 def test_openai_batch_preserves_input_order_when_server_reorders(openai_dialect):
@@ -387,6 +597,33 @@ def test_embedder_wraps_transport_failure_as_unavailable(wired, caplog):
     assert "connection refused" in exc_info.value.cause
     assert embedder_mod._keyword_only_notice_done is True
     assert any("dialect=openai" in r.getMessage() for r in caplog.records)
+
+
+def test_embedder_redacts_embedding_api_key_from_failure_logs_and_exception(
+    wired, monkeypatch, caplog
+):
+    secret = "super-secret-embedding-key"
+
+    monkeypatch.setenv("PALINODE_EMBEDDING_API_KEY", secret)
+    monkeypatch.delenv("PALINODE_EMBEDDING_API_KEY_FILE", raising=False)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Authorization"] == f"Bearer {secret}"
+        return httpx.Response(
+            401,
+            text=f"Invalid API key: {secret}",
+        )
+
+    wired(handler)
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(EmbeddingUnavailable) as exc_info:
+            embedder_mod.embed("hi")
+
+    assert secret not in caplog.text
+    assert secret not in str(exc_info.value)
+    assert secret not in exc_info.value.cause
+    assert "[REDACTED]" in exc_info.value.cause
 
 
 # ──────────────────────────────────────────────────────────────────────────

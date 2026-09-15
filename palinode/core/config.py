@@ -102,6 +102,9 @@ class PrimaryEmbeddingConfig:
     # breaker, and typed per-input errors either way. Mirrors the CHAT role's
     # `auto_summary.api` selector; no auto-detection.
     dialect: str = "ollama"
+    # Optional path for OpenAI-compatible embedding providers whose endpoint is
+    # not /v1/embeddings. None preserves the legacy /v1/embeddings behaviour.
+    endpoint_path: str | None = None
     # Ollama's GPU path for GGUF bge-m3 returns a NaN vector for a small set of
     # exact inputs (llama.cpp casts K/V to F16 before flash attention on
     # cacheless encoders; Inf → NaN in softmax; the server refuses to serialise

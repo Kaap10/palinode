@@ -400,6 +400,24 @@ embeddings:
     dimensions: 1024
 ```
 
+Hosted OpenAI-compatible embedding providers can also use bearer
+authentication and provider-specific endpoint paths. Credentials stay out of
+YAML: set `PALINODE_EMBEDDING_API_KEY`, or set
+`PALINODE_EMBEDDING_API_KEY_FILE` to the path of a file containing the key.
+
+For providers whose embedding endpoint is not `/v1/embeddings`, set
+`endpoint_path`. When it is omitted, the existing bare-host and trailing-`/v1`
+behavior is unchanged.
+
+```yaml
+embeddings:
+  primary:
+    dialect: openai
+    url: "https://generativelanguage.googleapis.com/v1beta/openai"
+    endpoint_path: "/embeddings"
+    model: "gemini-embedding-001"
+```
+
 When exposing the API beyond loopback (`PALINODE_API_HOST` other than `127.0.0.1`), set `PALINODE_API_TOKEN` — the server refuses to start unauthenticated on a non-loopback bind unless you opt out explicitly with `PALINODE_API_ALLOW_UNAUTH=1`. See [SECURITY.md](SECURITY.md#api-authentication) for the bearer-token auth model and the bind gate.
 
 ---

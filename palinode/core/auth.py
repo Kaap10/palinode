@@ -7,6 +7,8 @@ security-sensitive comparison logic.
 Public names
 ------------
 load_api_token()        — read PALINODE_API_TOKEN / PALINODE_API_TOKEN_FILE
+load_embedding_api_key() — read PALINODE_EMBEDDING_API_KEY /
+                           PALINODE_EMBEDDING_API_KEY_FILE
 BearerAuthMiddleware    — ASGI middleware; no-op when token is None
 validate_auth_config()  — SystemExit gate for BIND_INTENT=public + no-token
 validate_bind_auth()    — SystemExit gate for non-loopback bind + no-token
@@ -67,6 +69,35 @@ def load_api_token() -> str | None:
                 "auth will be unconfigured"
             )
             return None
+    return None
+
+
+def load_embedding_api_key() -> str | None:
+    """Return the embedding API key, or ``None`` if unconfigured.
+
+    Source priority:
+      1. ``PALINODE_EMBEDDING_API_KEY`` env var.
+      2. ``PALINODE_EMBEDDING_API_KEY_FILE`` — path to a file whose contents
+         are the key.
+
+    Whitespace is stripped; empty values resolve to ``None``. File-read errors
+    are logged without exposing the configured file path.
+    """
+    env_key = os.environ.get("PALINODE_EMBEDDING_API_KEY", "").strip()
+    if env_key:
+        return env_key
+
+    file_path = os.environ.get("PALINODE_EMBEDDING_API_KEY_FILE", "").strip()
+    if file_path:
+        try:
+            return Path(file_path).read_text(encoding="utf-8").strip() or None
+        except OSError:
+            logger.error(
+                "PALINODE_EMBEDDING_API_KEY_FILE set but unreadable; "
+                "embedding auth will be unconfigured"
+            )
+            return None
+
     return None
 
 

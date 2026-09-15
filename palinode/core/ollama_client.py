@@ -44,6 +44,7 @@ from typing import Any, Callable, Deque
 
 import httpx
 
+from palinode.core.auth import load_embedding_api_key
 from palinode.core.config import config
 
 logger = logging.getLogger(__name__)
@@ -212,6 +213,34 @@ def _is_input_error_message(message: str) -> bool:
     """Return True if a 5xx body names a deterministic per-input failure."""
     msg_lower = (message or "").lower()
     return any(p in msg_lower for p in _INPUT_ERROR_PATTERNS)
+
+
+def _redact_authorization_secret(
+    text: str,
+    headers: dict[str, str] | None,
+) -> str:
+    """Redact credentials echoed by an authenticated provider response."""
+    if not text or not headers:
+        return text
+
+    authorization = next(
+        (
+            value
+            for key, value in headers.items()
+            if key.lower() == "authorization"
+        ),
+        "",
+    )
+    if not authorization:
+        return text
+
+    redacted = text.replace(authorization, "[REDACTED]")
+
+    parts = authorization.split(maxsplit=1)
+    if len(parts) == 2 and parts[1]:
+        redacted = redacted.replace(parts[1], "[REDACTED]")
+
+    return redacted
 
 
 def _extract_embedding_vector(data: Any) -> list[float] | None:
@@ -679,6 +708,7 @@ class OllamaClient:
         model: str | None,
         op: str,
         base_url: str | None = None,
+        headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """POST ``payload`` to ``{role_url}{path}``, returning parsed JSON.
 
@@ -711,7 +741,12 @@ class OllamaClient:
         for attempt in range(max_retries + 1):
             t0 = self._monotonic()
             try:
-                resp = self._client.post(url, json=payload, timeout=timeout)
+                resp = self._client.post(
+                url,
+                json=payload,
+                timeout=timeout,
+                headers=headers,
+                )
                 resp.raise_for_status()
                 try:
                     data = resp.json()
@@ -755,7 +790,10 @@ class OllamaClient:
                     # body names the rejected input, and `str(e)` alone is just
                     # the status line plus an MDN link.
                     try:
-                        body_4xx = (e.response.text or "").strip()[:300]
+                        body_4xx = _redact_authorization_secret(
+                            e.response.text or "",
+                            headers,
+                        ).strip()[:300]
                     except Exception:
                         body_4xx = ""
                     raise OllamaError(
@@ -781,9 +819,10 @@ class OllamaClient:
                         retry_count=attempt, circuit_state=cb.state.value,
                         outcome=f"http_{status}_input", op=op, level=logging.WARNING,
                     )
+                    safe_body_text = _redact_authorization_secret(body_text, headers)
                     raise OllamaInputError(
                         f"Ollama {op} failed for this input (role={role.value}, "
-                        f"HTTP {status}): {body_text.strip()}",
+                        f"HTTP {status}): {safe_body_text.strip()}",
                         role=role.value, model=model, status_code=status,
                     ) from e
                 # 5xx is transient — fall through to retry handling.
@@ -1106,12 +1145,24 @@ class OllamaClient:
         typed form of Ollama's HTTP-200 error body, which these servers do
         not emit.
         """
+        endpoint_path = config.embeddings.primary.endpoint_path
+
+        if endpoint_path:
+            path = "/" + endpoint_path.lstrip("/")
+            base_url = _resolve_base_url(OllamaRole.EMBED).rstrip("/")
+        else:
+            path = _OPENAI_EMBED_PATH
+            base_url = _openai_embed_base_url()
+
         text_len = sum(len(text) for text in texts)
+        api_key = load_embedding_api_key()
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else None
         try:
             data = self._request_json(
-                OllamaRole.EMBED, _OPENAI_EMBED_PATH, {"model": model, "input": texts},
+                OllamaRole.EMBED, path, {"model": model, "input": texts},
                 timeout=timeout, retries=retries, model=model, op=op,
-                base_url=_openai_embed_base_url(),
+                base_url=base_url,
+                headers=headers,
             )
         except OllamaInputError as e:
             raise EmbeddingInputError(

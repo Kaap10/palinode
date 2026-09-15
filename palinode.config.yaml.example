@@ -77,6 +77,14 @@ embeddings:
     # url: "http://localhost:8080"
     # model: "bge-m3"          # llama-server ignores it; vLLM / LM Studio match it
     #
+    # Example — hosted OpenAI-compatible embedding provider:
+    # Credentials are read from PALINODE_EMBEDDING_API_KEY, or from the file
+    # named by PALINODE_EMBEDDING_API_KEY_FILE. Do not put API keys in YAML.
+    # dialect: "openai"
+    # url: "https://generativelanguage.googleapis.com/v1beta/openai"
+    # endpoint_path: "/embeddings"
+    # model: "gemini-embedding-001"
+    #
     # Ollama's GPU path returns a NaN vector for a few exact inputs (a flash-
     # attention precision bug in llama.cpp on cacheless encoders; the same input
     # embeds fine on CPU). Such a rejection is retried once with num_gpu 0 and

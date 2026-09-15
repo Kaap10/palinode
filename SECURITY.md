@@ -84,6 +84,24 @@ export PALINODE_API_TOKEN_FILE=/run/secrets/palinode_api_token
 `PALINODE_API_TOKEN` takes precedence over `PALINODE_API_TOKEN_FILE` when both
 are set. Whitespace is stripped. An empty value is treated as "no token".
 
+### Hosted embedding provider credentials
+
+OpenAI-compatible embedding providers can use a separate bearer credential:
+
+```bash
+export PALINODE_EMBEDDING_API_KEY=<value>
+# or, for docker-secrets / sealed-secrets style deployments:
+export PALINODE_EMBEDDING_API_KEY_FILE=/run/secrets/palinode_embedding_api_key
+```
+
+`PALINODE_EMBEDDING_API_KEY` takes precedence over
+`PALINODE_EMBEDDING_API_KEY_FILE` when both are set. Whitespace is stripped,
+and an empty value is treated as no credential.
+
+This credential is used only when `embeddings.primary.dialect` is `openai` and
+is sent as `Authorization: Bearer <key>`. Native Ollama embedding requests do
+not receive this credential.
+
 ### Using the token from a client
 
 ```bash
