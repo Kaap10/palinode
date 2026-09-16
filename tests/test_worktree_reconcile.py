@@ -86,24 +86,29 @@ def test_pid_alive_child_process_lifecycle():
     assert _pid_alive(proc.pid) is False
 
 
-def test_pid_alive_failsafe_on_access_denied_or_error(monkeypatch):
-    if sys.platform == "win32":
-        import palinode.cli.worktree as wt
-        monkeypatch.setattr(wt._kernel32, "OpenProcess", lambda *_: 0)
-        # ERROR_ACCESS_DENIED = 5
-        monkeypatch.setattr(wt._kernel32, "GetLastError", lambda: 5)
-        assert _pid_alive(12345) is True
-        # Unexpected error (e.g. 999) -> fail-safe alive
-        monkeypatch.setattr(wt._kernel32, "GetLastError", lambda: 999)
-        assert _pid_alive(12345) is True
-        # ERROR_INVALID_PARAMETER = 87 -> False
-        monkeypatch.setattr(wt._kernel32, "GetLastError", lambda: 87)
-        assert _pid_alive(12345) is False
-    else:
-        def raise_eperm(pid, sig):
-            raise PermissionError("Access denied")
-        monkeypatch.setattr(os, "kill", raise_eperm)
-        assert _pid_alive(12345) is True
+@pytest.mark.skipif(sys.platform != "win32", reason="Win32-specific error code tests")
+def test_pid_alive_failsafe_on_access_denied_or_error_win32(monkeypatch):
+    import ctypes
+    import palinode.cli.worktree as wt
+
+    monkeypatch.setattr(wt._kernel32, "OpenProcess", lambda *_: 0)
+    # ERROR_ACCESS_DENIED = 5 -> fail-safe alive
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 5)
+    assert _pid_alive(12345) is True
+    # Unexpected error (e.g. 999) -> fail-safe alive
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 999)
+    assert _pid_alive(12345) is True
+    # ERROR_INVALID_PARAMETER = 87 -> dead (False)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 87)
+    assert _pid_alive(12345) is False
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-specific PermissionError test")
+def test_pid_alive_failsafe_on_access_denied_posix(monkeypatch):
+    def raise_eperm(pid, sig):
+        raise PermissionError("Access denied")
+    monkeypatch.setattr(os, "kill", raise_eperm)
+    assert _pid_alive(12345) is True
 
 
 def test_pid_alive_invalid_types_and_bounds():
@@ -117,30 +122,30 @@ def test_pid_alive_invalid_types_and_bounds():
     assert _pid_alive(0x1_0000_0000) is False  # > 32-bit DWORD
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Win32-specific process wait code tests")
 def test_pid_alive_win32_wait_codes(monkeypatch):
-    if sys.platform == "win32":
-        import palinode.cli.worktree as wt
+    import palinode.cli.worktree as wt
 
-        closed = []
-        monkeypatch.setattr(wt._kernel32, "OpenProcess", lambda *_: 1234)
-        monkeypatch.setattr(wt._kernel32, "CloseHandle", lambda h: closed.append(h) or True)
+    closed = []
+    monkeypatch.setattr(wt._kernel32, "OpenProcess", lambda *_: 1234)
+    monkeypatch.setattr(wt._kernel32, "CloseHandle", lambda h: closed.append(h) or True)
 
-        # WAIT_TIMEOUT (0x102) -> running (True)
-        monkeypatch.setattr(wt._kernel32, "WaitForSingleObject", lambda h, ms: 0x00000102)
-        assert _pid_alive(100) is True
-        assert closed == [1234]
+    # WAIT_TIMEOUT (0x102) -> running (True)
+    monkeypatch.setattr(wt._kernel32, "WaitForSingleObject", lambda h, ms: 0x00000102)
+    assert _pid_alive(100) is True
+    assert closed == [1234]
 
-        # WAIT_OBJECT_0 (0x0) -> exited (False)
-        closed.clear()
-        monkeypatch.setattr(wt._kernel32, "WaitForSingleObject", lambda h, ms: 0x00000000)
-        assert _pid_alive(100) is False
-        assert closed == [1234]
+    # WAIT_OBJECT_0 (0x0) -> exited (False)
+    closed.clear()
+    monkeypatch.setattr(wt._kernel32, "WaitForSingleObject", lambda h, ms: 0x00000000)
+    assert _pid_alive(100) is False
+    assert closed == [1234]
 
-        # WAIT_FAILED / unexpected -> fail-safe (True)
-        closed.clear()
-        monkeypatch.setattr(wt._kernel32, "WaitForSingleObject", lambda h, ms: 0xFFFFFFFF)
-        assert _pid_alive(100) is True
-        assert closed == [1234]
+    # WAIT_FAILED / unexpected -> fail-safe (True)
+    closed.clear()
+    monkeypatch.setattr(wt._kernel32, "WaitForSingleObject", lambda h, ms: 0xFFFFFFFF)
+    assert _pid_alive(100) is True
+    assert closed == [1234]
 
 
 def test_pid_alive_exit_code_259_dead():

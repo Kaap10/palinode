@@ -66,15 +66,13 @@ if sys.platform == "win32":
     _WAIT_OBJECT_0 = 0x00000000
     _ERROR_INVALID_PARAMETER = 87
 
-    _kernel32 = ctypes.windll.kernel32
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     _kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     _kernel32.OpenProcess.restype = wintypes.HANDLE
     _kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
     _kernel32.WaitForSingleObject.restype = wintypes.DWORD
     _kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
     _kernel32.CloseHandle.restype = wintypes.BOOL
-    _kernel32.GetLastError.argtypes = []
-    _kernel32.GetLastError.restype = wintypes.DWORD
 
 
 def _pid_alive(pid: int) -> bool:
@@ -93,7 +91,7 @@ def _pid_alive(pid: int) -> bool:
             _PROCESS_QUERY_LIMITED_INFORMATION | _SYNCHRONIZE, False, pid
         )
         if not handle:
-            err = _kernel32.GetLastError()
+            err = ctypes.get_last_error()
             if err == _ERROR_INVALID_PARAMETER:
                 return False
             # ERROR_ACCESS_DENIED (5) or any unexpected OS error -> fail-safe alive
