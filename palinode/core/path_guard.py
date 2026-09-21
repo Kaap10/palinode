@@ -73,7 +73,10 @@ def memory_base_dir() -> str:
     return os.path.realpath(getattr(config, "memory_dir", config.palinode_dir))
 
 
-def to_rel_path(file_path: str, base_dir: str | None = None) -> str:
+def to_rel_path(
+    file_path: str | os.PathLike[str],
+    base_dir: str | os.PathLike[str] | None = None,
+) -> str:
     """Best-effort memory-relative path for display, derived from ``memory_dir``.
 
     This is the read side of the relative-path story — not a security
@@ -90,24 +93,26 @@ def to_rel_path(file_path: str, base_dir: str | None = None) -> str:
     install), and mis-split when a directory segment repeated (e.g.
     ``.../palinode/palinode/``).
 
-    Never raises. Returns ``file_path`` unchanged when it is falsy, already
-    relative, on a different drive (Windows), or genuinely outside the base
-    directory (``os.path.relpath`` would otherwise happily walk ``../`` out
-    of it, which is misleading for what is meant to be a memory-relative
-    path).
+    Never raises. Normalizes newly computed relative subpaths and
+    already-relative paths to POSIX forward slashes (``/``). Returns
+    ``file_path`` unchanged as an absolute path when it is falsy, on a
+    different drive (Windows), or genuinely outside the base directory
+    (``os.path.relpath`` would otherwise happily walk ``../`` out of it,
+    which is misleading for what is meant to be a memory-relative path).
     """
-    if not file_path or not isinstance(file_path, str):
-        return file_path
-    if not os.path.isabs(file_path):
-        return file_path.replace("\\", "/")
-    base = base_dir if base_dir is not None else config.memory_dir
+    if not file_path:
+        return "" if file_path == "" else os.fspath(file_path)
+    path_str = os.fspath(file_path)
+    if not os.path.isabs(path_str):
+        return path_str.replace("\\", "/")
+    base_str = os.fspath(base_dir) if base_dir is not None else config.memory_dir
     try:
-        rel = os.path.relpath(file_path, base)
+        rel = os.path.relpath(path_str, base_str)
     except ValueError:
         # Windows: file_path and base on different drives.
-        return file_path
-    if rel == os.pardir or rel.startswith(os.pardir + os.sep) or rel.startswith(os.pardir + "/"):
-        return file_path
+        return path_str
+    if rel == os.path.pardir or rel.startswith(os.path.pardir + os.path.sep):
+        return path_str
     return rel.replace("\\", "/")
 
 

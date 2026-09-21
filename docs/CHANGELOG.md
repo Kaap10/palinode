@@ -12,6 +12,7 @@ All notable changes to Palinode. Format follows [Keep a Changelog](https://keepa
 
 - Vault imports now preserve distinct wikilink targets when source filenames share a slug, prefer exact source-stem matches, and report unresolved slug collisions instead of silently resolving them by iteration order.
 - `to_rel_path()` now consistently normalizes relative paths to POSIX forward slashes across all platforms, fixing backslash-separated paths on Windows in API and MCP outputs ([#214](https://github.com/phasespace-labs/palinode/issues/214)).
+
 ### Removed
 
 ### Security

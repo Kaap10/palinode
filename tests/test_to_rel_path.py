@@ -14,7 +14,9 @@ configurations the old approach failed on.
 """
 from __future__ import annotations
 
+import ntpath
 import os
+from pathlib import Path
 
 from palinode.core.config import config
 from palinode.core.path_guard import to_rel_path
@@ -95,9 +97,31 @@ def test_rel_path_accepts_explicit_base_dir_override(tmp_path):
     assert to_rel_path(abs_path, base_dir=str(base)) == "research/note.md"
 
 
-def test_rel_path_windows_explicit_paths():
-    """Verify Windows-style paths produce POSIX forward slashes."""
-    if os.name == "nt":
-        base = r"C:\Users\test\memory"
-        target = r"C:\Users\test\memory\projects\test.md"
-        assert to_rel_path(target, base_dir=base) == "projects/test.md"
+def test_rel_path_supports_pathlike_inputs(tmp_path):
+    """``os.PathLike`` / ``pathlib.Path`` inputs are accepted for file_path and base_dir."""
+    memory_dir = tmp_path / "second-brain"
+    memory_dir.mkdir()
+    sub_path = memory_dir / "decisions" / "foo.md"
+
+    # Absolute Path
+    assert to_rel_path(sub_path, base_dir=memory_dir) == "decisions/foo.md"
+    # Relative Path
+    assert to_rel_path(Path("decisions/foo.md")) == "decisions/foo.md"
+
+
+def test_rel_path_windows_semantics_with_ntpath(monkeypatch):
+    """Verify Windows backslash paths normalize to POSIX forward slashes across all runners."""
+    monkeypatch.setattr("palinode.core.path_guard.os.path", ntpath)
+
+    base = r"C:\Users\test\memory"
+    # In-tree path converts backslashes to forward slashes
+    target = r"C:\Users\test\memory\projects\test.md"
+    assert to_rel_path(target, base_dir=base) == "projects/test.md"
+
+    # External path returns unchanged
+    outside = r"C:\other\outside.md"
+    assert to_rel_path(outside, base_dir=base) == outside
+
+    # Cross-drive path returns unchanged
+    cross_drive = r"D:\memory\projects\test.md"
+    assert to_rel_path(cross_drive, base_dir=base) == cross_drive
