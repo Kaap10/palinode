@@ -116,7 +116,7 @@ def test_rel_path_from_falls_back_when_rel_path_missing(monkeypatch, tmp_path):
 
     abs_path = os.path.join(str(memory_dir), "decisions", "no-rel-path.md")
     payload = {"file_path": abs_path}
-    assert _rel_path_from(payload) == os.path.join("decisions", "no-rel-path.md")
+    assert _rel_path_from(payload) == "decisions/no-rel-path.md"
 
 
 def test_rel_path_from_uses_custom_key_for_topic_coverage_best_match():
@@ -433,5 +433,5 @@ async def test_dispatch_search_falls_back_to_config_memory_dir_without_rel_path(
     monkeypatch.setattr(mcp, "_post", fake_post)
     result = await _dispatch_tool("palinode_search", {"query": "anything"})
     text = result[0].text
-    assert os.path.join("decisions", "legacy.md") in text
+    assert "decisions/legacy.md" in text
     assert abs_path not in text

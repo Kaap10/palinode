@@ -25,6 +25,7 @@ from palinode.core import aliases
 from palinode.core import expiry as _expiry
 from palinode.core import parser as _parser
 from palinode.core.lifecycle import contains_retired_fact_text, eligibility
+from palinode.core.path_guard import to_rel_path
 from palinode.core.quote_verify import QuoteStatus, verify_source_anchors
 # The hybrid-search scoring pipeline + its pure decay/predicate helpers live in
 # ranker.py. Re-exported here so `store.effective_importance`,
@@ -2217,7 +2218,7 @@ def search_associative(
         except Exception:
             continue
         
-        rel_path = fp.replace(config.memory_dir + "/", "").lstrip("/")
+        rel_path = to_rel_path(fp)
         entity_score = activation.get(
             next((e for e in activated_entities if e.split("/")[-1] in fp), ""), 0.5
         )

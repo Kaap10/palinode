@@ -112,7 +112,7 @@ def test_save_returns_rel_path_alongside_file_path(client):
     data = resp.json()
     assert data["rel_path"] == "insights/rel-path-save.md"
     # Additive: file_path is untouched and still absolute.
-    assert data["file_path"].endswith("insights/rel-path-save.md")
+    assert data["file_path"].replace("\\", "/").endswith("insights/rel-path-save.md")
     assert data["file_path"] != data["rel_path"]
 
 

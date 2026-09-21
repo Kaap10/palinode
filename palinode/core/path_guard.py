@@ -96,17 +96,19 @@ def to_rel_path(file_path: str, base_dir: str | None = None) -> str:
     of it, which is misleading for what is meant to be a memory-relative
     path).
     """
-    if not file_path or not os.path.isabs(file_path):
+    if not file_path or not isinstance(file_path, str):
         return file_path
+    if not os.path.isabs(file_path):
+        return file_path.replace("\\", "/")
     base = base_dir if base_dir is not None else config.memory_dir
     try:
         rel = os.path.relpath(file_path, base)
     except ValueError:
         # Windows: file_path and base on different drives.
         return file_path
-    if rel == os.pardir or rel.startswith(os.pardir + os.sep):
+    if rel == os.pardir or rel.startswith(os.pardir + os.sep) or rel.startswith(os.pardir + "/"):
         return file_path
-    return rel
+    return rel.replace("\\", "/")
 
 
 def resolve_memory_path(file_path: str) -> tuple[str, str]:

@@ -17,6 +17,7 @@ import yaml
 from datetime import UTC, datetime
 from palinode.core import git_tools
 from palinode.core.config import config
+from palinode.core.path_guard import to_rel_path
 
 logger = logging.getLogger("palinode.consolidation.layer_split")
 
@@ -308,7 +309,7 @@ def split_all_core_files() -> dict:
                     if emb:
                         trigger_id = f"auto-{base}"
                         # Need to pass relative path to memory_file
-                        rel_path = results["identity"].replace(config.memory_dir + "/", "")
+                        rel_path = to_rel_path(results["identity"])
                         store.add_trigger(trigger_id, desc, rel_path, emb)
                         stats["triggers_registered"] += 1
                 except Exception as e:
